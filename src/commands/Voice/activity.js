@@ -1,9 +1,9 @@
-import { SlashCommandBuilder, PermissionFlagsBits, PermissionsBitField, ChannelType, MessageFlags } from 'discord.js';
-import { createEmbed, errorEmbed, successEmbed } from '../../utils/embeds.js';
+import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from 'discord.js';
+import axios from 'axios';
+import { createEmbed, errorEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { handleInteractionError } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
-import { getColor } from '../../config/bot.js';
 
 const ACTIVITIES = {
     'youtube': '880218394199220334',
@@ -38,121 +38,154 @@ const ACTIVITY_NAMES = {
 export default {
     data: new SlashCommandBuilder()
         .setName('activity')
-        .setDescription('Start a Discord Activity in your voice channel')
+        .setDescription('Start a Discord Activity or check Blox Fruits stock')
         .setDMPermission(false)
         .setDefaultMemberPermissions(PermissionFlagsBits.Connect)
-        
+
+        // Activity Commands
         .addSubcommand(subcommand =>
             subcommand
                 .setName('youtube')
-                .setDescription('Watch YouTube videos together in a voice channel')
+                .setDescription('Watch YouTube videos together')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('poker')
-                .setDescription('Play Poker Night with friends')
+                .setDescription('Play Poker Night')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('chess')
                 .setDescription('Play Chess in the Park')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('checkers')
                 .setDescription('Play Checkers in the Park')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('letter-league')
-                .setDescription('Play the word-based game Letter League')
+                .setDescription('Play Letter League')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('spellcast')
-                .setDescription('Play the magical word game SpellCast')
+                .setDescription('Play SpellCast')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('sketch')
-                .setDescription('Play Sketch Heads (Pictionary style)')
+                .setDescription('Play Sketch Heads')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('blazing8s')
-                .setDescription('Play the card game Blazing 8s')
+                .setDescription('Play Blazing 8s')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('puttparty')
-                .setDescription('Play Putt Party (Mini-golf)')
+                .setDescription('Play Putt Party')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('landio')
-                .setDescription('Play the territory game Land-io')
+                .setDescription('Play Land-io')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('bobble')
                 .setDescription('Play Bobble League')
         )
-        
+
         .addSubcommand(subcommand =>
             subcommand
                 .setName('knowwhat')
                 .setDescription('Play Know What I Mean')
+        )
+
+        // Blox Fruits Stock Command
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('bloxstock')
+                .setDescription('Check current Blox Fruits stock')
         ),
 
     category: "Voice",
 
-    async execute(interaction, config, client) {
+    async execute(interaction) {
         try {
-            
-            const deferred = await InteractionHelper.safeDefer(interaction, { flags: MessageFlags.Ephemeral });
-            if (!deferred) {
-                return;
-            }
+            const deferred = await InteractionHelper.safeDefer(interaction, {
+                flags: MessageFlags.Ephemeral
+            });
+
+            if (!deferred) return;
 
             const { member, options } = interaction;
-            const activity = options.getSubcommand();
-            const activityId = ACTIVITIES[activity];
-            const activityName = ACTIVITY_NAMES[activity] || activity;
+            const command = options.getSubcommand();
+
+            // BLOX FRUITS STOCK
+            if (command === 'bloxstock') {
+                const response = await axios.get(
+                    'https://blox-fruits-stock-fruit.vercel.app/api/stock'
+                );
+
+                const data = response.data;
+
+                const normalStock = data.stock.normal?.join('\n') || 'No stock';
+                const mirageStock = data.stock.mirage?.join('\n') || 'No stock';
+
+                return await InteractionHelper.safeEditReply(interaction, {
+                    embeds: [
+                        createEmbed({
+                            title: '🍍 Blox Fruits Stock',
+                            description:
+                                `**Normal Dealer:**\n${normalStock}\n\n` +
+                                `**Mirage Dealer:**\n${mirageStock}`,
+                            color: 'success'
+                        })
+                    ]
+                });
+            }
+
+            // ACTIVITY COMMANDS
+            const activityId = ACTIVITIES[command];
+            const activityName = ACTIVITY_NAMES[command] || command;
 
             if (!member.voice.channel) {
                 return await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [errorEmbed('Not in Voice Channel', 'You need to be in a voice channel to start an activity!')]
+                    embeds: [
+                        errorEmbed(
+                            'Not in Voice Channel',
+                            'You need to be in a voice channel to start an activity!'
+                        )
+                    ]
                 });
             }
 
-            logger.debug('Activity command - validating permissions', {
-                userId: interaction.user.id,
-                voiceChannelId: member.voice.channel.id,
-                voiceChannelName: member.voice.channel.name,
-                activity: activity
-            });
+            const permissions = member.voice.channel.permissionsFor(
+                interaction.guild.members.me
+            );
 
-            const permissions = member.voice.channel.permissionsFor(interaction.guild.members.me);
             if (!permissions.has('CreateInstantInvite')) {
-                logger.warn('Activity command - missing permissions', {
-                    userId: interaction.user.id,
-                    voiceChannelId: member.voice.channel.id,
-                    guildId: interaction.guildId,
-                    activity: activity,
-                    missingPermission: 'CreateInstantInvite'
-                });
                 return await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [errorEmbed('Missing Permissions', 'I need the `Create Invite` permission to start an activity!')]
+                    embeds: [
+                        errorEmbed(
+                            'Missing Permissions',
+                            'I need the `Create Invite` permission to start an activity!'
+                        )
+                    ]
                 });
             }
 
@@ -162,54 +195,43 @@ export default {
                     body: {
                         max_age: 86400,
                         target_type: 2,
-                        target_application_id: activityId,
-                    },
+                        target_application_id: activityId
+                    }
                 }
             );
 
-            logger.info('Activity invite created successfully', {
-                userId: interaction.user.id,
-                userTag: interaction.user.tag,
-                voiceChannelId: member.voice.channel.id,
-                voiceChannelName: member.voice.channel.name,
-                guildId: interaction.guildId,
-                activity: activity,
-                activityName: activityName,
-                inviteCode: invite.code,
-                commandName: 'activity'
-            });
-
             await InteractionHelper.safeEditReply(interaction, {
-                embeds: [createEmbed({
-                    title: `🎮 ${activityName}`,
-                    description: `Click the link below to start **${activityName}** in ${member.voice.channel.name}!\n\n[Join ${activityName} Activity](https://discord.gg/${invite.code})`,
-                    color: 'success'
-                })]
+                embeds: [
+                    createEmbed({
+                        title: `🎮 ${activityName}`,
+                        description:
+                            `Click below to start **${activityName}** in ${member.voice.channel.name}!\n\n` +
+                            `[Join ${activityName} Activity](https://discord.gg/${invite.code})`,
+                        color: 'success'
+                    })
+                ]
             });
 
         } catch (error) {
-            logger.error('Error creating activity invite', {
+            logger.error('Command failed', {
                 error: error.message,
-                stack: error.stack,
-                userId: interaction.user.id,
-                voiceChannelId: interaction.member?.voice.channel?.id,
-                guildId: interaction.guildId,
-                activity: options.getSubcommand(),
-                commandName: 'activity'
+                stack: error.stack
             });
-            
+
             if (!interaction.deferred && !interaction.replied) {
                 await handleInteractionError(interaction, error, {
-                    commandName: 'activity',
-                    source: 'discord_activity_api'
+                    commandName: 'activity'
                 });
             } else {
                 await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [errorEmbed('Failed to Create Activity', 'An error occurred while trying to create the activity. Please try again later.')]
+                    embeds: [
+                        errorEmbed(
+                            'Command Failed',
+                            'An error occurred while processing your request.'
+                        )
+                    ]
                 });
             }
         }
-    },
+    }
 };
-
-
